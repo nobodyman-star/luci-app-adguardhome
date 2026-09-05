@@ -83,17 +83,33 @@ UPX_Compress(){
 	echo -e "开始下载 ${upx_name} ...\n"
 	$Downloader /tmp/upx-${upx_latest_ver}-${Arch_upx}_linux.tar.xz "https://github.com/upx/upx/releases/download/v${upx_latest_ver}/${upx_name}"
 	if [[ ! -e /tmp/upx-${upx_latest_ver}-${Arch_upx}_linux.tar.xz ]]; then
-		echo -e "\n${upx_name} 下载失败!\n" 
+		echo -e "\n${upx_name} 下载失败!\n"
 		EXIT 1
 	else
-		echo -e "\n${upx_name} 下载成功!\n" 
+		echo -e "\n${upx_name} 下载成功!\n"
 	fi
-	which xz > /dev/null 2>&1 || (opkg list | grep ^xz || opkg update > /dev/null 2>&1 && opkg install xz --force-depends) || (echo "软件包 xz 安装失败!" && EXIT 1)
+
+    # ==========修复后的xz依赖安装逻辑==========
+	if ! command -v xz >/dev/null 2>&1; then
+	    if command -v opkg >/dev/null 2>&1; then
+	        opkg update >/dev/null 2>&1
+	        opkg install xz --force-depends >/dev/null 2>&1
+	    elif command -v apk >/dev/null 2>&1; then
+	        apk update >/dev/null 2>&1
+	        apk add xz >/dev/null 2>&1
+	    fi
+	    if ! command -v xz >/dev/null 2>&1; then
+	        echo "软件包 xz 安装失败!"
+	        EXIT 1
+	    fi
+	fi
+
 	mkdir -p /tmp/upx-${upx_latest_ver}-${Arch_upx}_linux
-	echo -e "正在解压 ${upx_name} ...\n" 
+	echo -e "正在解压 ${upx_name} ...\n"
 	xz -d -c /tmp/upx-${upx_latest_ver}-${Arch_upx}_linux.tar.xz | tar -x -C "/tmp"
 	[[ ! -f /tmp/upx-${upx_latest_ver}-${Arch_upx}_linux/upx ]] && echo -e "\n${upx_name} 解压失败!" && EXIT 1
 }
+
 
 Update_Core(){
 	rm -r /tmp/AdGuardHome_Update > /dev/null 2>&1
@@ -153,57 +169,65 @@ Update_Core(){
 }
 
 GET_Arch() {
-	Archt="$(opkg info kernel | grep Architecture | awk -F "[ _]" '{print($2)}')"
-	case "${Archt}" in
-	"i386")
-		Arch="386"
-		;;
-	"i686")
-		Arch="386"
-		;;
-	"x86")
-		Arch="amd64"
-		;;
-	"mipsel")
-		Arch="mipsle"
-	;;
-	"mips64el")
-		Arch="mips64le"
-		Arch="mipsle"
-		echo -e "mips64el use $Arch may have bug"
-	;;
-	"mips")
-		Arch="mips"
-	;;
-	"mips64")
-		Arch="mips64"
-		Arch="mips"
-		echo -e "mips64 use $Arch may have bug"
-	;;
-	"arm")
-		Arch="arm"
-		;;
-	"aarch64")
-		Arch="arm64"
-		;;
-	"powerpc")
-		Arch="ppc"
-		echo -e "error not support $Archt"
-		EXIT 1
-		;;
-	"powerpc64")
-		Arch="ppc64"
-		echo -e "error not support $Archt"
-		EXIT 1
-		;;
+    if command -v opkg >/dev/null 2>&1; then
+        # OpenWrt 24.10 及更早 opkg 分支
+        Archt="$(opkg info kernel | grep Architecture | awk -F "[ _]" '{print($2)}')"
+    else
+        # OpenWrt 25.12 apk 分支
+        if [ -f "/etc/os-release" ]; then
+            source /etc/os-release
+            Archt="${OPENWRT_ARCH%%_*}"
+        else
+            # 兜底，防止极少数精简固件没有os‑release
+            Archt=$(uname -m)
+        fi
+    fi
 
-	*)
-		echo -e "error not support $Archt if you can use offical release please issue a bug"
-		EXIT 1
-		;;
-	esac
-        echo  "$Arch"
+    case "${Archt}" in
+    "i386"|"i686")
+        Arch="386"
+        ;;
+    "x86_64"|"x86")
+        Arch="amd64"
+        ;;
+    "mipsel")
+        Arch="mipsle"
+        ;;
+    "mips64el")
+        Arch="mipsle"
+        echo -e "mips64el use $Arch may have bug"
+        ;;
+    "mips")
+        Arch="mips"
+        ;;
+    "mips64")
+        Arch="mips"
+        echo -e "mips64 use $Arch may have bug"
+        ;;
+    armv7*)
+        Arch="arm"
+        ;;
+    "aarch64")
+        Arch="arm64"
+        ;;
+    "powerpc")
+        Arch="ppc"
+        echo -e "error not support $Archt"
+        EXIT 1
+        ;;
+    "powerpc64")
+        Arch="ppc64"
+        echo -e "error not support $Archt"
+        EXIT 1
+        ;;
+    *)
+        echo -e "error not support $Archt if you can use offical release please issue a bug"
+        EXIT 1
+        ;;
+    esac
+    echo "$Arch"
 }
+
 
 EXIT(){
 	rm -rf /var/run/update_core $LOCKU 2>/dev/null
